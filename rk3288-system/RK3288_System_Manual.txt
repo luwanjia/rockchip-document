@@ -1,0 +1,168 @@
+This manual is for the development of linux on RK3288 board.
+
+1. Set develop environment
+    1> We need two cross compilers, arm-eabi-gcc and arm-linux-gnueabihf-gcc
+
+    2> arm-eabi-gcc is used to compile the kernel of linux, which is included in AndroidSDK_5.1.
+    if you have downloaded AndroidSDK5.1, you can find it in path "AndroidSDK_5.1/prebuilts/gcc/linux-x86/arm", we use arm-eabi-4.6. The version of arm-eabi-gcc is 4.6.
+
+    3> arm-linux-gnueabihf-gcc is used to compile the applications you developed on linux platform, and you should download it otherwhere, if you just compile the kernel, it is not necessary.
+    
+2. Build kernel
+    1> Download source code of kernel4.4 for linux.
+        $git clone https://github.com/T-Firefly/kernel_4.4.git
+
+    2> Change to right branch
+        $git checkout firefly
+
+    3> Config whith right configure file.
+        $export ARCH=arm
+        $export CROSS_COMPILE=<path to arm-eabi-gcc root dir>/bin/arm-eabi-
+        $make rockchip_linux_defconfig
+        $make rk3288-firefly.img
+
+    4> If there is no errors, the last print log is:
+          OBJCOPY arch/arm/boot/zImage
+          Kernel: arch/arm/boot/zImage is ready
+          Image:  kernel.img is ready
+        Pack to resource.img successed!
+          Image:  resource.img (with rk3288-firefly.dtb logo.bmp) is ready
+
+    5> Make modules
+        $make modules
+        $mkdir modules_install
+        $make INSTALL_MOD_PATH=./modules_install modules_install
+
+3. Build initrd
+    1> Download source code
+        $git clone https://github.com/TeeFirefly/initrd.git
+
+    2> Change to branch for-kernel_4.4
+        $git checkout for-kernel_4.4
+
+    3> Build in parent directory of initrd root directory.
+        $make -C initrd
+
+    4> If there is no errors, initrd.img will be generated.
+
+4. Pack zImage and initrd.img into the linux-root.img
+    $mkbootimg --kernel kernel_4.4/arch/arm/boot/zImage --ramdisk initrd.img --second kernel_4.4/resource.img -o linux-boot.img
+
+  Now, linux-boot.img is OK, it will be flashed into the rk3288 board.
+
+5. Make the rootfs of ubuntu16.04
+    1> Fist, please download the minimum core of ubuntu
+        $wget -c http://cdimage.ubuntu.com/ubuntu-base/releases/16.04/release/ubuntu-base-16.04-core-armhf.tar.gz
+
+    2> unpack
+        $mkdir linux-rootfs
+        $sudo tar -xpf ubuntu-base-16.04-core-armhf.tar.gz -C linux-rootfs
+
+    3> Install the simulator to run the root file system
+        $sudo apt-get install qemu-user-static
+        $sudo cp /usr/bin/qemu-arm-static linux-rootfs/usr/bin/
+
+    4> Copy the local host DNS configure to rootfs
+        $sudo cp -b /etc/resolv.conf  linux-rootfs/etc/resolv.conf
+
+    5> Add additional sources of port ubuntu, append follow strings to linux-rootfs/etc/apt/sources.list as administrator
+        deb http://ports.ubuntu.com/ubuntu-ports/ xenial main universe
+        deb-src http://ports.ubuntu.com/ubuntu-ports/ xenial main universe
+
+    6> Use a mount script file to mount the core file system. Please see file ch-mount.sh, and add executable permissions.
+        $sudo chmod +x ch-mount.sh
+
+    7> Mount rootfs, Notice that do not excute the script as administrator, otherwise errors will occur.
+        $./ch-mount.sh -m linux-rootfs
+
+        Now, you will enter the simulate bash as root, you can install any packages you want to integrate.
+        a) Install network tools to make ifconfig command work.
+            #apt-get install net-tools
+		b) If you want to use as bluetooth slaver to play music, pulseaudio-module-bluetooth is necessary.
+			#apt install pulseaudio-module-bluetooth
+        c) Enable bash command complete automatically
+			#apt-get install bash-completion
+        d) Install xubuntu desktop
+			#apt-get install ubuntu-session xubuntu-desktop
+            Please wait to be done.
+            Start dbus server to solve the error: 
+                Failed to connect to socket /var/run/dbus/system_bus_socket: No such file or directory
+            #/etc/init.d/dbus start
+        e) Enable auto connect to network
+            #echo auto eth0 > /etc/network/interfaces.d/eth0
+            #echo iface eth0 inet dhcp >> /etc/network/interfaces.d/eth0
+		f) Change hostname as you want
+			#echo "localhost" > /etc/hostname
+			#echo "127.0.0.1 localhost" > /etc/hosts
+        e) Setup startup desktop
+            #update-alternatives --config x-session-manager
+            Selection:
+                desktop | x-session
+               ---------------------
+                xubuntu | startxfce4
+               ---------------------     
+                lubuntu | startlxde
+        f) Set default login screen
+            #dpkg-reconfigure lightdm
+        g) Set the user and password to login
+            #useradd -s '/bin/bash' -m -G adm,sudo ubuntu
+            #passwd ubuntu
+            #passwd root
+        h) Exit from simulate bash
+            #exit
+
+    8> After your installations in rootfs, please unmount the rootfs:
+        $./ch-mount.sh -u linux-rootfs
+
+    9> Copy modules to rootfs you built in the kernel.
+        $sudo rsync -av <path to kernel>/modules_install/ /path/to/your/rfs/
+
+
+    10> Create an empty image disk to save rootfs
+        $dd if=/dev/zero of=linux-rootfs.img bs=1M count=4096
+        $sudo mkfs.ext4 -F -L linuxroot linux-rootfs.img
+
+    11> Mount the image disk, and copy the rootfs to it
+        $mkdir mnt
+        $sudo mount linux-rootfs.img mnt
+        $sudo cp -rfp linux-rootfs/* mnt/
+
+    12> Unmount the image disk and resize it.
+        $sudo umount mnt
+        $/sbin/e2fsck -p -f linux-rootfs.img
+        $/sbin/resize2fs -M linux-rootfs.img
+
+    13> Now, rootfs is done.
+
+6. Make one key update package.
+    1> We need linux-boot.img and linux-rootfs.img created just now. And the tools to flash them into board.
+    In AndroidSDK_5.1, the tools is avaiable:
+    AndroidSDK_5.1/RKTools/linux/Linux_Upgrade_Tool_v1.2/rockdev
+
+    2> Copy rockdev to somewhere as you want. And copy linux-rootfs.img and linux-rootfs.img to rockdev/Image directory.
+
+    3> Do some modifications for parameter and package-file, and run mkupdate.sh
+        Maybe you don't know how to modify parameter and package-file, it does't matter, you can unpack an official package, and you will get these two files.
+    
+        a) Unpack an official package, I use Firefly-rk3288_Ubuntu_1604_2016_10181203_Beta.img as official package.
+            $mv Firefly-rk3288_Ubuntu_1604_2016_10181203_Beta.img update.img
+            $./unpack.sh
+            
+            After that, you will get all the files you need.
+
+        b) Make update.img
+            $./mkupdate.sh
+
+        Notice that, you should add the excutable permissions to all script files.
+
+    4> Now, update.img will generated here.
+
+7. Flash update.img to board.
+    1> Press the recovery button and reset button at the same time.
+
+    2> Free the reset button and hold on the recovery button for more than 2 seconds.
+
+    3> Now, the board entry the flash model, and use follow command to flash:
+        $sudo upgrade_tool uf update.img
+
+    4> Please wait, after flash success, the board will reboot automatically.

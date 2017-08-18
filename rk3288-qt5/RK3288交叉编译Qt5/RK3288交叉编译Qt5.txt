@@ -1,0 +1,147 @@
+RK3288交叉编译Qt5源代码，并QtCreator开发嵌入式UI
+
+系统版本：
+当期PC系统版本：Linux zorinos 4.8.0-56-generic #61~16.04.1-Ubuntu SMP Wed Jun 14 11:58:22 UTC 2017 x86_64 x86_64 x86_64 GNU/Linux
+RK3288开发板： kernel4.4.55+Xubuntu16.04 (基于官方Firefly-rk3288_Ubuntu_16.04_201705250940.img修改，只是把其内核替换成了kernel4.4.55，因为默认VGA输出不支持)
+
+1. 安装交叉编译器
+    $sudo apt-get install gcc-arm-linux-gnueabihf
+    $sudo apt-get install g++-arm-linux-gnueabihf
+
+    其实有两个编译器可用，gcc-arm-linux-gnueabihf和gcc-arm-linux-gnueabi，关于两者的差别，请找度娘脑补。
+
+    (能用apt-get直接安装成功的跳过后面步骤)
+    如果无法用apt-get安装，提示:Unable to locate package gcc-arm-linux-gnueabihf, 你需要单独下载交叉编译器，这里用的gcc5.4。
+    $wget -c https://releases.linaro.org/components/toolchain/binaries/5.4-2017.05/arm-linux-gnueabihf/gcc-linaro-5.4.1-2017.05-x86_64_arm-linux-gnueabihf.tar.xz
+
+    手动安装arm-linux-gnueabihf：
+    $tar -xvf gcc-linaro-5.4.1-2017.05-x86_64_arm-linux-gnueabihf.tar.xz
+    $mv gcc-linaro-5.4.1-2017.05-x86_64_arm-linux-gnueabihf arm-linux-gnueabihf-5.4.1 // 这里只不过是根据自己喜好重命名
+    $sudo cp -rf arm-linux-gnueabihf-5.4.1 /opt  // 这个路径也是自定义的，后面把环境变量配成一致就行
+
+    修改用户目录下面的".bashrc"文件，在最后追加：PATH=$PATH:/opt/arm-linux-gnueabihf-5.4.1/bin
+    执行以下命令立即生效：
+    $source ~/.bashrc
+    然后测试是否安装成功：
+    $arm-linux-gnueabihf-gcc -v
+  
+2. Qt5源代码下子及openssl配置
+    1> 选择版本Qt5.5.1
+        为啥不选择其他更高版本？ 负责任的告诉大家，编译不过！！！ 目前尝试5.8和5.9都编译失败，很想吐槽Qt官方所谓的发布版本，其他版本还没有尝试。另一个原因就是RK3288开发板上面的libQt5Core.so的版本是5.5.1, 当然要版本一致才行，至于版本不一致会有什么问题，俺也不晓得。
+        下载链接：http://download.qt.io/archive/qt/5.5/5.5.1/single/qt-everywhere-opensource-src-5.5.1.tar.xz
+        建议：代码解压后最好在本地用git管理起来，这样方便还原以及清理。想重新编译只需要git clean -df就可以还原，非常方便。给git一个赞！
+
+    2> 下载编译openssl
+        Qt5.5.1的编译需要使用openssl库，用最新的openssl版本会有问题，一些定义找不到，这里用的是OpenSSL_1_0_1版本。
+
+        a) 下载源代码
+            $git clone https://github.com/openssl/openssl.git
+
+        b) 获取OpenSSL_1_0_1版本的代码：
+            $git checkout -b local_OpenSSL_1_0_1 OpenSSL_1_0_1
+            (可以使用git tag -l查看openssl发布的所有版本号)
+
+        c) 配置openssl
+            $mkdir arm-openssl arm-ssl // 如果目录存在请删之或者清空，用于make install
+            $cd openssl
+            $setarch i386 ./config no-asm no-shared enable-ssl3 enable-ssl3-method --prefix=$PWD/../arm-openssl --openssldir=$PWD/../arm-ssl --cross-compile-prefix=arm-linux-gnueabihf-
+          
+        d) 编译
+            $make // 如果提示-m32错误，请修改当前目录下面的Makefile文件，全局搜索-m32, 删除掉即可。然后重新make
+            $make install
+
+        e) 顺利的话，在arm-openssl目录中会生成相应的头文件和静态链接库。arm-ssl目录下面也会生成一些东西，暂时没用到，忽略。
+
+        f) 分别复制openssl头文件和静态库文件到arm-linux-gnueabihf的include目录和和lib目录下，主要是方便之后编译直接链接，不需要修改make选项。当然，每个人的处理方式不一样，此步骤仅供参考。
+            $cd arm-openssl
+            $sudo cp -rf include/openssl /usr/arm-linux-gnueabihf/include/
+            $sudo cp -rf lib/lib* /usr/arm-linux-gnueabihf/lib/
+            (以上路径请根据编译器安装情况具体确定，请自行修改)
+
+    到此，你已经具备了编译Qt5.5.1的一切条件，开工吧！
+
+3. 编译Qt5.5.1
+    1> 定义Qt5.5.1的SDK路径
+        该路径非常重要，之后你的Qt5 SDK就会安装在此路径下，需要编译前配置好，否则路径不对导致之后Qt Creator无法正常使用此SDK。
+        这里定义SDK路径为：/opt/qt-5.5.1-arm
+        $sudo mkdir /opt/qt-5.5.1-arm
+
+        (你可以根据自己喜好定义，但是编译完成后，如果需要移动到其他电脑上，你必须把SDK放在同样的目录下面)
+
+    2> 修改qmake.conf文件
+        $gedit qt-everywhere-opensource-src-5.5.1/qtbase/mkspecs/linux-arm-gnueabi-g++/qmake.conf
+        将所有arm-linux-gnueabi都改成arm-linux-gnueabihf，如下：
+        #
+        # qmake configuration for building with arm-linux-gnueabihf-g++
+        #
+
+        MAKEFILE_GENERATOR      = UNIX
+        CONFIG                 += incremental
+        QMAKE_INCREMENTAL_STYLE = sublib
+
+        include(../common/linux.conf)
+        include(../common/gcc-base-unix.conf)
+        include(../common/g++-unix.conf)
+
+        # modifications to g++.conf
+        QMAKE_CC                = arm-linux-gnueabihf-gcc
+        QMAKE_CXX               = arm-linux-gnueabihf-g++
+        QMAKE_LINK              = arm-linux-gnueabihf-g++
+        QMAKE_LINK_SHLIB        = arm-linux-gnueabihf-g++
+
+        # modifications to linux.conf
+        QMAKE_AR                = arm-linux-gnueabihf-ar cqs
+        QMAKE_OBJCOPY           = arm-linux-gnueabihf-objcopy
+        QMAKE_NM                = arm-linux-gnueabihf-nm -P
+        QMAKE_STRIP             = arm-linux-gnueabihf-strip
+        load(qt_config)
+
+    3> 执行Configure
+        $cd qt-everywhere-opensource-src-5.5.1
+        $./configure -prefix /opt/qt-5.5.1-arm -opensource -nomake tests -nomake examples -opensource -xplatform linux-arm-gnueabi-g++
+        注意：-prefix选项后面的路径就是上一步中定义的SDK路径
+
+    4> 编译
+        $make -j4
+        (这里要编译好久，慢的话估计得编译个把小时，先干点别的去吧！)
+
+    5> 安装
+        $sudo make install
+        (第1步定义的SDK路径需要root权限访问，请以root权限安装)
+
+    到此，你的SDK就编译完成了。
+
+4. 使用Qt Creator进行嵌入式开发
+    1> 下载Qt Creator
+        $wget -c http://download.qt.io/official_releases/qtcreator/4.3/4.3.0/qt-creator-opensource-linux-x86_64-4.3.0.run
+        $sudo chmod +x qt-creator-opensource-linux-x86_64-4.3.0.run
+        $sudo ./qt-creator-opensource-linux-x86_64-4.3.0.run
+
+    2> 配置Qt Creator的交叉编译器及Qt Version
+        a) 启动Qt Creator
+        b) 选择[Tools]-[Options]-[Build & Run]
+        c) 配置Qt Versions，如图：
+          1.png
+        d) 配置Kits，如图
+          2.png
+        e) 配置编译器，如图
+          3.png
+          4.png
+      
+    3> 新建测试程序
+        a) 创建UI测试程序，如图：
+          5.png
+        b) 将编译好的可执行文件复制到开发板上运行
+          运行之前，请在开发板上安装Qt5：
+          $sudo apt-get install qt5-default
+          (开发板上已经有firefly定制的libQt5Core.so库，安装完qt5-default之后，qt5相关的程序就能直接运行了)
+
+          效果图：
+          6.png
+
+    4> 编译好的Qt5 SDK分享
+        链接: https://pan.baidu.com/s/1dEHm4GL 密码: nni3
+
+        请解压到/opt目录，然后Qt Creator就可以配置它了。
+    
+5. 整个教程到此结束
