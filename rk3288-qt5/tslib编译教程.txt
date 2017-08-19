@@ -1,0 +1,16 @@
+tslib安装
+
+1. 获取源码
+	$git clone https://github.com/kergoth/tslib.git
+2. 取最新发布版本(当前最新为1.9版本)
+	$git checkout -b local_1.9 1.9
+3. 安装支持库及工具
+	$sudo apt install autoconf libtool
+4. 新建安装目录
+	$mkdir -p ../ts
+5. 生成Makefile
+	$./configure CC=arm-linux-gnueabihf-gcc CXX=arm-linux-gnueabihf-g++ --prefix=/home/jazz/QtSDK/ts --host=arm-linux-gnueabihf ac_cv_func_malloc_0_nonnull=yes
+6. 编译
+	$make
+7. 安装到安装目录
+	$make install
